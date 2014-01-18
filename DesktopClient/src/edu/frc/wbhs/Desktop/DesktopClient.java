@@ -11,6 +11,8 @@ import edu.wpi.first.wpilibj.camera.AxisCamera;
 import edu.wpi.first.wpilibj.camera.AxisCameraException;
 import edu.wpi.first.wpilibj.image.*;
 import edu.wpi.first.wpilibj.image.NIVision.MeasurementType;
+import java.util.Scanner;
+
 
 
 /**
@@ -75,7 +77,14 @@ public class DesktopClient {
 	
 	public static void main(String[] args)
 	{
-		
+		NetworkTable Output = NetworkTable.getTable("Output");
+		Scanner user_input = new Scanner( System.in );
+		System.out.println("New P value");
+		Output.putString("P", user_input.next());
+		System.out.println("New I value");
+		Output.putString("I", user_input.next());
+		System.out.println("New D value");
+		Output.putString("D", user_input.next());
 	}
 	
 	public void Start()
@@ -84,8 +93,8 @@ public class DesktopClient {
 		NetworkTable.setIPAddress("10.47.37.2");
 		Input = NetworkTable.getTable("Input");
 		Output = NetworkTable.getTable("Output");
-		cc = new CriteriaCollection();      // create the criteria for the particle filter
-		cc.addCriteria(MeasurementType.IMAQ_MT_AREA, AREA_MINIMUM, 65535, false);
+//		cc = new CriteriaCollection();      // create the criteria for the particle filter
+//		cc.addCriteria(MeasurementType.IMAQ_MT_AREA, AREA_MINIMUM, 65535, false);
 		
 		
 	}
@@ -149,16 +158,43 @@ public class DesktopClient {
 		idealAspectRatio = vertical ? (4.0 / 32) : (23.5 / 4);	//Vertical reflector 4" wide x 32" tall, horizontal 23.5" wide x 4" tall
 
 		//Divide width by height to measure aspect ratio
-		if (report.boundingRectWidth > report.boundingRectHeight) {
+		if (report.boundingRectWidth > report.boundingRectHeight) 
+		{
 			//particle is wider than it is tall, divide long by short
 			aspectRatio = ratioToScore((rectLong / rectShort) / idealAspectRatio);
-		} else {
+		} else 
+		{
 			//particle is taller than it is wide, divide short by long
 			aspectRatio = ratioToScore((rectShort / rectLong) / idealAspectRatio);
 		}
 		return aspectRatio;
 	}
 
+	
+	boolean scoreCompare(Scores scores, boolean vertical) {
+		boolean isTarget = true;
+
+		isTarget &= scores.rectangularity > RECTANGULARITY_LIMIT;
+		if (vertical) {
+			isTarget &= scores.aspectRatioVertical > ASPECT_RATIO_LIMIT;
+		} else {
+			isTarget &= scores.aspectRatioHorizontal > ASPECT_RATIO_LIMIT;
+		}
+
+		return isTarget;
+	}
+	
+		boolean hotOrNot(TargetReport target) 
+		{
+		boolean isHot = true;
+
+		isHot &= target.tapeWidthScore >= TAPE_WIDTH_LIMIT;
+		isHot &= target.verticalScore >= VERTICAL_SCORE_LIMIT;
+		isHot &= (target.leftScore > LR_SCORE_LIMIT) | (target.rightScore > LR_SCORE_LIMIT);
+
+		return isHot;
+		}
+	
 	
 
 	public void FindHotGoal()
@@ -168,7 +204,8 @@ public class DesktopClient {
 			Scores scores[] = new Scores[filteredImage.getNumberParticles()];
 			horizontalTargetCount = verticalTargetCount = 0;
 			
-			if (filteredImage.getNumberParticles() > 0) {
+			if (filteredImage.getNumberParticles() > 0) 
+			{
 					for (int i = 0; i < MAX_PARTICLES && i < filteredImage.getNumberParticles(); i++) {
 						ParticleAnalysisReport report = filteredImage.getParticleAnalysisReport(i);
 						scores[i] = new Scores();
@@ -178,8 +215,65 @@ public class DesktopClient {
 						scores[i].aspectRatioVertical = scoreAspectRatio(filteredImage, report, i, true);
 						scores[i].aspectRatioHorizontal = scoreAspectRatio(filteredImage, report, i, false);
 
+						//Check if the particle is a horizontal target, if not, check if it's a vertical target
+						if (scoreCompare(scores[i], false)) {
+							System.out.println("particle: " + i + "is a Horizontal Target centerX: " + report.center_mass_x + "centerY: " + report.center_mass_y);
+							horizontalTargets[horizontalTargetCount++] = i; //Add particle to target array and increment count
+						} else if (scoreCompare(scores[i], true)) {
+							System.out.println("particle: " + i + "is a Vertical Target centerX: " + report.center_mass_x + "centerY: " + report.center_mass_y);
+							verticalTargets[verticalTargetCount++] = i;  //Add particle to target array and increment count
+						} else {
+							System.out.println("particle: " + i + "is not a Target centerX: " + report.center_mass_x + "centerY: " + report.center_mass_y);
+						}
+						System.out.println("rect: " + scores[i].rectangularity + "ARHoriz: " + scores[i].aspectRatioHorizontal);
+						System.out.println("ARVert: " + scores[i].aspectRatioVertical);
+				}
+				
+				//Zero out scores and set verticalIndex to first target in case there are no horizontal targets
+					target.totalScore = target.leftScore = target.rightScore = target.tapeWidthScore = target.verticalScore = 0;
+					target.verticalIndex = verticalTargets[0];
+					for (int i = 0; i < verticalTargetCount; i++) {
+						ParticleAnalysisReport verticalReport = filteredImage.getParticleAnalysisReport(verticalTargets[i]);
+						for (int j = 0; j < horizontalTargetCount; j++) {
+							ParticleAnalysisReport horizontalReport = filteredImage.getParticleAnalysisReport(horizontalTargets[j]);
+							double horizWidth, horizHeight, vertWidth, leftScore, rightScore, tapeWidthScore, verticalScore, total;
+
+							//Measure equivalent rectangle sides for use in score calculation
+							horizWidth = NIVision.MeasureParticle(filteredImage.image, horizontalTargets[j], false, MeasurementType.IMAQ_MT_EQUIVALENT_RECT_LONG_SIDE);
+							vertWidth = NIVision.MeasureParticle(filteredImage.image, verticalTargets[i], false, MeasurementType.IMAQ_MT_EQUIVALENT_RECT_SHORT_SIDE);
+							horizHeight = NIVision.MeasureParticle(filteredImage.image, horizontalTargets[j], false, MeasurementType.IMAQ_MT_EQUIVALENT_RECT_SHORT_SIDE);
+
+							//Determine if the horizontal target is in the expected location to the left of the vertical target
+							leftScore = ratioToScore(1.2 * (verticalReport.boundingRectLeft - horizontalReport.center_mass_x) / horizWidth);
+							//Determine if the horizontal target is in the expected location to the right of the  vertical target
+							rightScore = ratioToScore(1.2 * (horizontalReport.center_mass_x - verticalReport.boundingRectLeft - verticalReport.boundingRectWidth) / horizWidth);
+							//Determine if the width of the tape on the two targets appears to be the same
+							tapeWidthScore = ratioToScore(vertWidth / horizHeight);
+							//Determine if the vertical location of the horizontal target appears to be correct
+							verticalScore = ratioToScore(1 - (verticalReport.boundingRectTop - horizontalReport.center_mass_y) / (4 * horizHeight));
+							total = leftScore > rightScore ? leftScore : rightScore;
+							total += tapeWidthScore + verticalScore;
+
+							//If the target is the best detected so far store the information about it
+							if (total > target.totalScore) {
+								target.horizontalIndex = horizontalTargets[j];
+								target.verticalIndex = verticalTargets[i];
+								target.totalScore = total;
+								target.leftScore = leftScore;
+								target.rightScore = rightScore;
+								target.tapeWidthScore = tapeWidthScore;
+								target.verticalScore = verticalScore;
+							}
+						}
+						//Determine if the best target is a Hot target
+						target.Hot = hotOrNot(target);
+					}	
 					
-					}
+					
+					
+					
+					
+					
 			}
 
 		}	

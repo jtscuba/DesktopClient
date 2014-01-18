@@ -77,14 +77,17 @@ public class DesktopClient {
 	
 	public static void main(String[] args)
 	{
-		NetworkTable Output = NetworkTable.getTable("Output");
-		Scanner user_input = new Scanner( System.in );
-		System.out.println("New P value");
-		Output.putString("P", user_input.next());
-		System.out.println("New I value");
-		Output.putString("I", user_input.next());
-		System.out.println("New D value");
-		Output.putString("D", user_input.next());
+		while(true)
+		{
+			NetworkTable Output = NetworkTable.getTable("Output");
+			Scanner user_input = new Scanner( System.in );
+			System.out.println("New P value");
+			Output.putString("P", user_input.next());
+			System.out.println("New I value");
+			Output.putString("I", user_input.next());
+			System.out.println("New D value");
+			Output.putString("D", user_input.next());
+		}
 	}
 	
 	public void Start()
